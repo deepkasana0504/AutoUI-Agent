@@ -1,6 +1,11 @@
 import pyautogui
 
 
+# One scroll unit corresponds approximately to one grid-cell height.
+# Gemini should provide the number of grid-cell heights to scroll.
+SCROLL_UNITS_PER_CELL = 5
+
+
 def execute_action(action):
 
     action_type = action["action"]
@@ -120,11 +125,25 @@ def execute_action(action):
             "y"
         )
 
-        amount = action["amount"]
+        # Gemini provides this value in grid-cell units.
+        grid_amount = action.get(
+            "scroll_amount",
+            action.get(
+                "amount",
+                1,
+            ),
+        )
+
+        # Convert grid-cell units into PyAutoGUI scroll units.
+        amount = int(
+            grid_amount * SCROLL_UNITS_PER_CELL
+        )
 
         print(
             f"Scrolling at "
-            f"({x}, {y}) by {amount}"
+            f"({x}, {y}) "
+            f"by {grid_amount} grid units "
+            f"({amount} PyAutoGUI units)"
         )
 
         if (

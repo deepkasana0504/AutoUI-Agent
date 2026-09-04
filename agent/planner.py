@@ -62,6 +62,123 @@ def parse_model_json(text):
 
 
 # =========================================================
+# NORMALIZE ACTION
+# =========================================================
+
+def normalize_action(action):
+
+    if not isinstance(action, dict):
+        raise ValueError(
+            "Gemini did not return a JSON object."
+        )
+
+    action_type = action.get("action")
+
+    # -----------------------------------------------------
+    # WAIT AFTER ACTION
+    # -----------------------------------------------------
+
+    if action_type in {
+        "click",
+        "double_click",
+        "type",
+        "key",
+        "hotkey",
+        "scroll",
+    }:
+
+        wait_value = action.get(
+            "wait_after_action",
+            1.0,
+        )
+
+        try:
+            wait_value = float(
+                wait_value
+            )
+        except (TypeError, ValueError):
+            wait_value = 1.0
+
+        action["wait_after_action"] = max(
+            0.1,
+            min(
+                wait_value,
+                10.0,
+            ),
+        )
+
+    # -----------------------------------------------------
+    # SCROLL
+    # -----------------------------------------------------
+
+    if action_type == "scroll":
+
+        direction = action.get(
+            "direction",
+            "up",
+        ).lower()
+
+        if direction not in {
+            "up",
+            "down",
+        }:
+            direction = "up"
+
+        action["direction"] = direction
+
+        amount = action.get(
+            "scroll_amount",
+            action.get(
+                "amount",
+                1,
+            ),
+        )
+
+        try:
+            amount = float(
+                amount
+            )
+        except (TypeError, ValueError):
+            amount = 1.0
+
+        action["scroll_amount"] = max(
+            1.0,
+            min(
+                amount,
+                16.0,
+            ),
+        )
+
+    # -----------------------------------------------------
+    # WAIT
+    # -----------------------------------------------------
+
+    elif action_type == "wait":
+
+        seconds = action.get(
+            "seconds",
+            2,
+        )
+
+        try:
+            seconds = float(
+                seconds
+            )
+        except (TypeError, ValueError):
+            seconds = 2.0
+
+        action["seconds"] = max(
+            0.1,
+            min(
+                seconds,
+                10.0,
+            ),
+        )
+
+    return action
+
+
+# =========================================================
 # GET NEXT ACTION
 # =========================================================
 
@@ -88,7 +205,10 @@ def get_next_action(
 
         status = pending_action.get(
             "execution_status",
-            "executed",
+            pending_action.get(
+                "status",
+                "executed",
+            ),
         )
 
         if status == "not_executed":
@@ -96,7 +216,10 @@ def get_next_action(
             previous_status = "not_executed"
 
             previous_result = (
-                "The previous action was not executed."
+                pending_action.get(
+                    "result",
+                    "The previous action was not executed.",
+                )
             )
 
         elif status == "error":
@@ -104,7 +227,10 @@ def get_next_action(
             previous_status = "failed"
 
             previous_result = (
-                "The previous action failed."
+                pending_action.get(
+                    "result",
+                    "The previous action failed.",
+                )
             )
 
         else:
@@ -112,8 +238,11 @@ def get_next_action(
             previous_status = "passed"
 
             previous_result = (
-                "The previous action was executed. "
-                "Verify its result from the current screenshot."
+                pending_action.get(
+                    "result",
+                    "The previous action was executed. "
+                    "Verify its result from the current screenshot.",
+                )
             )
 
 
@@ -131,7 +260,9 @@ def get_next_action(
 
     else:
 
-        history = "No previous progress."
+        history = (
+            "No previous progress."
+        )
 
 
     # =====================================================
@@ -152,9 +283,23 @@ def get_next_action(
     prompt = f"""
 You control a computer using screenshots.
 
+Your job is to complete the user's task by choosing the
+next computer action.
+
 USER TASK:
 
 {task}
+
+
+=========================================================
+CURRENT SCREEN
+=========================================================
+
+The screenshot attached to this request is the CURRENT screen.
+
+The CURRENT screenshot is always the source of truth.
+
+Choose exactly ONE next action.
 
 
 =========================================================
@@ -164,7 +309,7 @@ PREVIOUS ACTION
 {json.dumps(
     pending_action,
     ensure_ascii=False,
-    indent=2,
+    indent=2
 ) if pending_action else "None"}
 
 
@@ -206,23 +351,301 @@ Cells are numbered left-to-right, then top-to-bottom:
 
 The red grid and numbers are visual guides only.
 
+IMPORTANT:
+
+The grid numbers in your response refer to the CURRENT
+screenshot.
+
+If you scroll, the page changes.
+
+Therefore, after every scroll action, you MUST inspect
+the NEW screenshot on the next planning step and return
+the NEW grid cells corresponding to the target's NEW
+position.
+
+Never reuse old cell numbers after scrolling.
+
+
+=========================================================
+CRITICAL USER CLARIFICATION RULE
+=========================================================
+
+Before performing an action, inspect the CURRENT SCREEN
+for decisions that the user has not specified.
+
+If the task requires the user to choose between multiple
+meaningful options, DO NOT GUESS.
+
+Instead use:
+
+    "action": "ask_user"
+
+Ask the user for the missing choices BEFORE continuing.
+
+Examples of choices that may require clarification:
+
+- order type
+- intraday vs regular
+- market vs limit
+- quantity
+- price
+- account or environment
+- region
+- instance type
+- operating system
+- security settings
+- alert/alarm settings
+- optional configuration that materially changes the result
+- any other important visible choice
+
+IMPORTANT:
+
+Ask about ALL relevant unresolved choices that are visible
+or clearly required on the CURRENT SCREEN in ONE question.
+
+Do NOT ask one question at a time if several decisions can
+be determined together.
+
+Do NOT ask about irrelevant UI options.
+
+Do NOT invent choices that are not visible or required.
+
+Do NOT assume the user's preferred option.
+
+The user may provide several answers in one response.
+
+Example:
+
+User task:
+
+    Buy 1 Infosys share.
+
+Current screen shows:
+
+    Intraday
+    Regular
+    Market
+    Limit
+
+and an option to create an alert.
+
+Instead of selecting an option yourself, return:
+
+{{
+    "action": "ask_user",
+    "question": "Before I continue, please specify: Intraday or Regular, Market or Limit, and whether you want a price alert. If you want an alert, tell me the price.",
+    "reason": "The current screen contains multiple meaningful choices that were not specified in the user's request."
+}}
+
+After the user answers, continue the task using those
+answers.
+
+IMPORTANT:
+
+If the user's original request already specifies a choice,
+DO NOT ask for that choice again.
+
+For example:
+
+    "Buy 1 Infosys share using a Regular Market order."
+
+Do not ask again about:
+
+    Regular
+    Market
+    quantity 1
+
+Only ask for other unresolved choices that materially
+matter and are visible.
+
+
+=========================================================
+FINANCIAL / DESTRUCTIVE ACTIONS
+=========================================================
+
+For actions that can create financial, destructive, or
+otherwise consequential changes, never silently guess
+important parameters.
+
+If the user has not specified an important parameter
+required by the visible interface, use ask_user first.
+
+Examples:
+
+    Buy / sell order
+    Payment
+    Transfer
+    Delete
+    Submit
+    Launch paid resources
+
+Do not execute the consequential action until the required
+choices have been clarified.
+
+
+=========================================================
+TARGET AMBIGUITY RULE
+=========================================================
+
+If the target text appears more than once on the visible
+screen, DO NOT CLICK yet.
+
+First determine which occurrence is relevant.
+
+Example:
+
+    Launch instance
+
+might appear once as a page heading and once as an actual
+button.
+
+If both are visible, OCR text alone is NOT sufficient to
+choose between them.
+
+If two occurrences remain genuinely plausible:
+
+    SCROLL FIRST.
+
+Never resolve genuine ambiguity by guessing.
+
+
+=========================================================
+HOW TO RESOLVE AMBIGUITY
+=========================================================
+
+When duplicate target text is visible:
+
+1. Identify the intended occurrence using surrounding UI
+   context.
+
+2. Identify the unwanted competing occurrence.
+
+3. Determine whether scrolling can separate them.
+
+4. Prefer SCROLLING UP FIRST when it can reasonably move
+   the unwanted occurrence out of the viewport while
+   keeping the intended target visible.
+
+5. If UP cannot resolve the ambiguity, use DOWN.
+
+6. If DOWN was attempted and did not resolve the ambiguity,
+   try UP.
+
+7. Never click an ambiguous target merely because OCR found
+   the text.
+
+Always consider both directions.
+
+The goal is:
+
+    ambiguous target
+          ↓
+    change viewport
+          ↓
+    target becomes unique
+
+
+=========================================================
+SCROLL DISTANCE
+=========================================================
+
+For every scroll action ALWAYS provide:
+
+    "direction"
+    "scroll_amount"
+
+"scroll_amount" is measured in approximately GRID-CELL
+HEIGHTS.
+
+Use the visible grid to estimate the required movement.
+
+Do NOT automatically use 1.
+
+Do NOT repeatedly make tiny scrolls when a larger movement
+is clearly required.
+
+Estimate the vertical distance between the unwanted
+occurrence and the viewport edge.
+
+Choose enough grid-cell heights so that the unwanted
+occurrence is actually removed from the visible viewport
+or the two occurrences become clearly distinguishable.
+
+Examples:
+
+    scroll_amount: 2
+
+means approximately two grid-cell heights.
+
+    scroll_amount: 5
+
+means approximately five grid-cell heights.
+
+    scroll_amount: 8
+
+means approximately one full screen height.
+
+The value MUST be based on the geometry visible in the
+CURRENT screenshot.
+
+Prefer a meaningful scroll large enough to actually change
+the relevant viewport.
+
+When ambiguity can reasonably be solved in either
+direction:
+
+    TRY UP FIRST.
+
+If UP cannot solve it:
+
+    TRY DOWN.
+
+If DOWN cannot solve it:
+
+    TRY UP.
+
+Do not keep repeating the same ineffective direction.
+
+
+=========================================================
+AFTER SCROLLING
+=========================================================
+
+A scroll changes the screenshot.
+
+Therefore:
+
+CURRENT SCREENSHOT
+        ↓
+Gemini chooses scroll
+        ↓
+executor scrolls
+        ↓
+NEW SCREENSHOT
+        ↓
+Gemini reassesses everything
+        ↓
+NEW target cells
+        ↓
+click only when unique
+
+After scrolling, NEVER assume the previous cells remain
+correct.
+
+The target may have moved to completely different grid
+cells.
+
+The next action MUST be based on the NEW screenshot.
+
 
 =========================================================
 CRITICAL CELL SELECTION RULE
 =========================================================
 
-For a click or double_click target:
+For click or double_click:
 
-The selected cells MUST contain the COMPLETE visible
-text that OCR will be asked to find.
-
-This is the MOST IMPORTANT requirement.
-
-The complete target text must be inside the selected
-region.
-
-Do NOT select a region that cuts off even part of the
-target text.
+The selected cells MUST contain the COMPLETE visible text
+that OCR will search.
 
 For example, if the target text is:
 
@@ -235,59 +658,16 @@ the selected cells must contain BOTH:
 
 completely.
 
-It is OK if the selected region also contains:
+Extra surrounding UI is acceptable.
 
-- other buttons
-- other text
-- icons
-- surrounding UI
-- another nearby control
-
-Extra content is acceptable.
-
-Do NOT sacrifice complete target coverage just to make the
-region smaller.
-
-
-=========================================================
-MULTIPLE MATCHES
-=========================================================
-
-If the same target text appears more than once:
-
-Choose the occurrence that actually satisfies the user's
-task.
-
-Prefer the occurrence whose surrounding UI context matches
-the requested action.
-
-If possible, select a region containing the intended
-occurrence while avoiding another occurrence of the SAME
-target text.
-
-If one occurrence is unique and another occurrence is
-ambiguous, choose the unique intended occurrence.
-
-Do NOT select a region containing multiple identical
-candidate texts when another region can uniquely identify
-the intended target.
-
-
-=========================================================
-REGION SIZE
-=========================================================
-
-After ensuring the COMPLETE target text is inside the
-region, keep the region reasonably small.
+Do NOT select cells that cut off part of the target text.
 
 Priority:
 
-1. COMPLETE target text must be inside the region.
-2. Select the correct occurrence.
+1. Complete target text coverage.
+2. Correct target occurrence.
 3. Avoid another identical target when reasonably possible.
 4. Keep the region reasonably small.
-
-Complete coverage is more important than minimal size.
 
 
 =========================================================
@@ -300,40 +680,74 @@ For click actions:
 
 "text" must contain the visible text that OCR should search.
 
-Example:
-
-"target": "Migrate a server button"
-
-"text": "Migrate a server"
-
 Do not add words such as "button" unless they are actually
 visible in the interface.
 
 
 =========================================================
-VERIFICATION
+WAITING AND LOADING
 =========================================================
 
-The CURRENT screenshot is the source of truth.
+The computer is asynchronous.
 
-If the previous action was executed, inspect the screenshot
-and determine whether the intended result actually occurred.
+Clicks, navigation, menus, dialogs and network requests can
+take time.
 
-If it occurred:
+Every computer action MUST contain:
 
-"previous_action_status": "passed"
+    "wait_after_action"
 
-Then immediately give the next action.
+Use:
 
-If it did not occur:
+    0.5 - 1.0 seconds
 
-"previous_action_status": "failed"
+for normal UI interactions.
 
-Choose a recovery action.
+Use:
 
-If the previous action was not physically executed:
+    1.0 - 2.0 seconds
 
-"previous_action_status": "not_executed"
+for normal navigation.
+
+Use:
+
+    2.0 - 5.0 seconds
+
+for slow pages, AWS navigation, dialogs, network requests,
+large UI transitions, and form submissions.
+
+Do NOT automatically use huge delays.
+
+Estimate the wait from the CURRENT SCREEN, the action, and
+the expected result.
+
+
+=========================================================
+EXPLICIT WAIT
+=========================================================
+
+If the CURRENT screenshot shows that the interface is still
+loading or transitioning, use:
+
+    "action": "wait"
+
+Examples:
+
+- spinner
+- skeleton loading
+- blank dynamic areas
+- partially rendered controls
+- loading indicators
+- page transition
+
+Do NOT declare a previous click failed merely because the
+new page has not finished loading.
+
+Wait and inspect again.
+
+Only declare navigation failed when the screenshot gives
+sufficient evidence that the expected transition did not
+happen.
 
 
 =========================================================
@@ -361,7 +775,6 @@ For click actions ALWAYS return:
 "text"
 "cells"
 
-
 Example:
 
 {{
@@ -371,7 +784,8 @@ Example:
     "target": "Sign in button",
     "text": "Sign in",
     "cells": [43, 44],
-    "reason": "The Sign in button is the intended control.",
+    "wait_after_action": 1.0,
+    "reason": "The Sign in button is uniquely identifiable.",
     "expected_result": "The sign-in action begins."
 }}
 
@@ -380,40 +794,83 @@ Example:
 SCROLL FORMAT
 =========================================================
 
-For a scroll action, provide ONLY the direction.
+For scroll actions ALWAYS return:
 
-Do NOT provide a scroll amount.
+"action"
+"direction"
+"scroll_amount"
 
-The only valid values are:
+Direction must be:
 
-"direction": "up"
+    "up"
 
-or
+or:
 
-"direction": "down"
+    "down"
+
+scroll_amount must be a positive number representing
+approximately how many grid-cell heights to scroll.
 
 Example:
 
 {{
     "action": "scroll",
-    "direction": "down",
-    "reason": "Scroll down to reveal the next part of the page.",
-    "expected_result": "More content below becomes visible."
+    "direction": "up",
+    "scroll_amount": 6,
+    "wait_after_action": 1.0,
+    "reason": "The competing occurrence can be moved out of the viewport by scrolling upward.",
+    "expected_result": "The intended target becomes uniquely identifiable."
 }}
 
-The runner supplies a fixed scroll amount automatically.
+
+=========================================================
+WAIT FORMAT
+=========================================================
+
+Example:
+
+{{
+    "action": "wait",
+    "seconds": 3,
+    "reason": "The previous navigation triggered loading and the page is still rendering.",
+    "expected_result": "The page finishes rendering."
+}}
+
+
+=========================================================
+ASK USER FORMAT
+=========================================================
+
+When clarification is required, return:
+
+{{
+    "action": "ask_user",
+    "question": "Your complete question containing all relevant unresolved choices.",
+    "reason": "Explain why these choices cannot safely be assumed."
+}}
+
+The question should be concise.
+
+Ask ALL relevant unresolved choices together.
+
+Do not execute another computer action before receiving
+the user's answer.
+
 
 =========================================================
 TYPE FORMAT
 =========================================================
 
+Example:
+
 {{
     "previous_action_status": "passed",
     "previous_action_result": "The search field is focused.",
     "action": "type",
-    "text": "anshuman kasana",
-    "reason": "Enter the requested contact name.",
-    "expected_result": "The search results show the contact."
+    "text": "Infosys",
+    "wait_after_action": 0.5,
+    "reason": "Enter the requested company name.",
+    "expected_result": "Search results for Infosys appear."
 }}
 
 
@@ -421,13 +878,16 @@ TYPE FORMAT
 KEY FORMAT
 =========================================================
 
+Example:
+
 {{
     "previous_action_status": "passed",
-    "previous_action_result": "The contact is selected.",
+    "previous_action_result": "The required item is selected.",
     "action": "key",
     "key": "enter",
-    "reason": "Open the selected contact.",
-    "expected_result": "The contact chat opens."
+    "wait_after_action": 1.0,
+    "reason": "Confirm the selected item.",
+    "expected_result": "The selected item opens."
 }}
 
 
@@ -457,19 +917,50 @@ Do NOT return pixel coordinates.
 
 For click and double_click:
 
-- Always provide the OCR text.
+- Always provide OCR text.
 - Always provide cells.
-- The cells MUST contain the COMPLETE OCR text.
+- Cells MUST contain the COMPLETE OCR text.
 - Extra surrounding content is acceptable.
-- Prefer a region where the intended target text is unique.
+- Prefer a region where the intended target is unique.
+- Never click when identical target occurrences remain
+  genuinely ambiguous.
+- After scrolling, calculate cells again from the NEW
+  screenshot.
 
-For scroll actions:
-- Always provide "direction".
-- Use only "up" or "down".
-- Never provide "amount".
-- Never invent a scroll magnitude.
+For scroll:
+
+- Always provide direction.
+- Direction must be "up" or "down".
+- Always provide scroll_amount.
+- scroll_amount is measured in approximate grid-cell heights.
+- Base scroll_amount on the visible geometry.
+- Do NOT default to tiny scrolls.
+- Prefer UP first when both directions could reasonably
+  resolve ambiguity.
+- DOWN is valid when clearly better.
+- If one direction is ineffective, try the opposite.
+
+For loading:
+
+- Use wait_after_action.
+- Use longer waits for navigation and heavy pages.
+- Use the wait action when the current screenshot visibly
+  shows loading.
+- Do not mistake temporary loading for action failure.
+
+For user clarification:
+
+- Use ask_user when important choices are missing.
+- Ask all relevant choices visible on the current screen in
+  one question.
+- Never guess an important user choice.
+- Do not ask again for choices already specified by the user.
+- After receiving the user's answer, use it for subsequent
+  actions.
+
+The CURRENT screenshot is always the source of truth.
 """
-    
+
 
     # =====================================================
     # GEMINI REQUEST
@@ -507,6 +998,10 @@ For scroll actions:
         text
     )
 
-    return parse_model_json(
+    action = parse_model_json(
         text
+    )
+
+    return normalize_action(
+        action
     )

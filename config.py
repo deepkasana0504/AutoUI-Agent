@@ -12,7 +12,7 @@ load_dotenv()
 
 MODEL = os.getenv(
     "GEMINI_MODEL",
-    "gemini-3.6-flash",
+    "gemini-3.7-flash",
 )
 
 API_KEY = (
@@ -38,4 +38,4 @@ SERVER_URL = os.getenv(
 
 MAX_STEPS = None
 
-PREPARE_DELAY = 10
+PREPARE_DELAY = 5
