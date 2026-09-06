@@ -47,8 +47,6 @@ and the interface requires choices such as Intraday/Regular or Market/Limit, Aut
 - `agent/` — planning, prompting, verification, and task loop
 - `computer/` — screenshot capture, coordinate conversion, and execution
 - `communication/` — WebSocket client and frontend events
-- `memory/` — compact confirmed progress
-- `utils/` — validation
 - `server.py` — communication relay server
 
 ## How It Works
