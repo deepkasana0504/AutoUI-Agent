@@ -5,3 +5,4 @@ mss
 Pillow
 PyAutoGUI
 pytesseract
+mcp
