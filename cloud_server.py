@@ -180,4 +180,4 @@ app = Starlette(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("cloud_server:app", host=os.getenv("HOST", "0.0.0.0"),
-                port=int(os.getenv("PORT", "8000")), reload=False)
+                port=int(os.getenv("PORT", "8000")), ws_max_size=25 * 1024 * 1024, reload=False)
