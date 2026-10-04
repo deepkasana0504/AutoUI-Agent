@@ -69,11 +69,16 @@ def execute_desktop_action(action_json: str) -> str:
         target = str(action.get("text", "")).strip()
         if not target:
             raise ValueError("click_text requires a non-empty text field")
+        cells = action.get("cells")
+        if not isinstance(cells, list) or not cells:
+            raise ValueError("click_text requires cells from the latest 12x8 screenshot")
+        if not all(isinstance(cell, int) and 1 <= cell <= GRID_COLUMNS * GRID_ROWS for cell in cells):
+            raise ValueError("cells must be integers from 1 to 96")
         screenshot = take_screenshot()
         location = locate_target(
             image=screenshot,
             target=target,
-            cells=action.get("cells", []),
+            cells=cells,
             columns=GRID_COLUMNS,
             rows=GRID_ROWS,
         )
