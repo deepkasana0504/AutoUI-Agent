@@ -74,3 +74,46 @@ Gemini identifies the grid cells containing the target, for example:
 ```text
 Target: Launch instance
 Cells: [75, 76, 77]
+
+
+## Cloud + ChatGPT MCP mode (prototype)
+
+This mode lets a customer-installed agent maintain an outbound WebSocket to your cloud gateway. ChatGPT connects to the remote MCP endpoint; the gateway routes each screenshot/action request to the correct authenticated device. It does not run Gemini's `agent.runner.run_task()` loop.
+
+### Components
+
+- `cloud_server.py`: one ASGI process hosting the device WebSocket gateway and Streamable HTTP MCP endpoint at `/mcp`.
+- `agent/cloud_client.py`: customer-side outbound WebSocket client; handles screenshot and action commands using the existing computer modules.
+- `cloud_agent.py`: customer-side entry point. Run this instead of `main.py` when ChatGPT is the reasoning client.
+- `main.py` remains the existing phone + Gemini flow.
+
+### Prototype setup
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+On the gateway host, copy `cloud.env.example` to a private environment file and set:
+- `AUTOUI_DEVICE_TOKENS`: JSON map of device IDs to unique random device secrets.
+- `AUTOUI_DEVICE_OWNERS`: JSON map of device IDs to account IDs.
+- `AUTOUI_USER_TOKENS`: JSON map of user bearer tokens to account IDs.
+
+Start the gateway behind HTTPS/WSS termination:
+
+```bash
+uvicorn cloud_server:app --host 0.0.0.0 --port 8000
+```
+
+Configure the customer device with `AUTOUI_GATEWAY_URL=wss://YOUR_DOMAIN/agent/ws`, its `AUTOUI_DEVICE_ID`, and its matching `AUTOUI_DEVICE_TOKEN`, then run:
+
+```bash
+python cloud_agent.py
+```
+
+Configure the remote MCP client to use `https://YOUR_DOMAIN/mcp` and a user bearer token in the `Authorization: Bearer ...` header. The tools are `list_devices`, `get_screenshot`, and `execute_action`. Use `get_screenshot` before deciding an action. The agent only accepts the documented desktop actions; it does not expose shell execution.
+
+### Important prototype limitations
+
+Authentication is currently environment-backed token mapping, not a customer login/OAuth flow. Replace it with your chosen identity provider and persistent device/account database before real customer use. Device sessions and pending requests are in memory, so one gateway process is required for this prototype; production multi-instance deployment needs shared session routing (for example Redis) and durable identity/device records. Deploy only behind TLS, keep secrets out of source control, add rate limits/audit logs/consent controls, and test with a non-sensitive desktop first.
