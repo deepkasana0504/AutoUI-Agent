@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP, Image
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.routing import Mount, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
@@ -25,6 +26,8 @@ DEVICE_TOKENS: dict[str, str] = json.loads(os.getenv("AUTOUI_DEVICE_TOKENS", "{}
 USER_TOKENS: dict[str, str] = json.loads(os.getenv("AUTOUI_USER_TOKENS", "{}"))
 DEVICE_OWNERS: dict[str, str] = json.loads(os.getenv("AUTOUI_DEVICE_OWNERS", "{}"))
 COMMAND_TIMEOUT = float(os.getenv("AUTOUI_COMMAND_TIMEOUT", "45"))
+MCP_ALLOWED_HOSTS = json.loads(os.getenv("AUTOUI_MCP_ALLOWED_HOSTS", '["localhost:*", "127.0.0.1:*"]'))
+MCP_ALLOWED_ORIGINS = json.loads(os.getenv("AUTOUI_MCP_ALLOWED_ORIGINS", "[]"))
 
 devices: dict[str, WebSocket] = {}
 pending: dict[str, tuple[str, asyncio.Future]] = {}
@@ -163,7 +166,12 @@ async def lifespan(app: Starlette):
 app = Starlette(
     routes=[
         WebSocketRoute("/agent/ws", agent_socket),
-        Mount("/mcp", app=mcp.streamable_http_app()),
+        Mount("/mcp", app=mcp.streamable_http_app(
+            transport_security=TransportSecuritySettings(
+                allowed_hosts=MCP_ALLOWED_HOSTS,
+                allowed_origins=MCP_ALLOWED_ORIGINS,
+            )
+        )),
     ],
     lifespan=lifespan,
 )
