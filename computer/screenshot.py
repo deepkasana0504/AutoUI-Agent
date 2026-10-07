@@ -1,43 +1,10 @@
 from io import BytesIO
 
-from PIL import Image, ImageDraw, ImageFont
 import pyautogui
+from PIL import ImageDraw, ImageFont
 
 
-# =========================================================
-# SCREENSHOT
-# =========================================================
-
-def take_screenshot():
-    """
-    Take a screenshot and return it as a PIL Image.
-    """
-
-    return pyautogui.screenshot()
-
-
-# =========================================================
-# IMAGE TO BYTES
-# =========================================================
-
-def image_to_bytes(image):
-    """
-    Convert PIL image to PNG bytes.
-    """
-
-    buffer = BytesIO()
-
-    image.save(
-        buffer,
-        format="PNG",
-    )
-
-    return buffer.getvalue()
-
-
-# =========================================================
-# GRID
-# =========================================================
+current_screenshot = None
 
 def add_target_grid(
     image,
@@ -186,31 +153,15 @@ def add_target_grid(
     return grid_image
 
 
-# =========================================================
-# COORDINATE CALIBRATION
-# =========================================================
+   
 
-def get_coordinate_calibration(
-    image,
-):
-    """
-    Return basic screenshot coordinate information.
+def take_screenshot():
+    global current_screenshot
+    current_screenshot = pyautogui.screenshot()
 
-    Kept for compatibility with the rest of the project.
-    """
+    grid_image = add_target_grid(current_screenshot)
 
-    width, height = image.size
+    buffer = BytesIO()
+    grid_image.save(buffer, format="PNG")
 
-    return {
-        "screen_width": width,
-        "screen_height": height,
-        "coordinate_origin": "top-left",
-        "x_range": [
-            0,
-            width - 1,
-        ],
-        "y_range": [
-            0,
-            height - 1,
-        ],
-    }
+    return buffer.getvalue()
